@@ -181,7 +181,8 @@ python3 reproduce_cema_lr.py                     # 复现 FC1×BiGRU×LR×seed42
 
 - 完整研究方法、部署手册与验收标准见 **`CEMA-LR_昇腾算子_交接文档.md`**（v0.5）。
 - 关键实测坑（`ShiftRight` 不可用、Level 2 尾部 mask 不可靠）已在交接文档 §9.2/§11.8 记录。
-- 许可证：见仓库根 `LICENSE`（CANN Open Software License Agreement v2.0）。
+- **许可证：GNU AGPL v3.0（`LICENSE`）**。本仓库为**自创算法**，采用最严格的 copyleft 许可
+  （AGPL-3.0-only）：任何修改/网络部署（含云服务）须开源完整源码，保护算法不被闭源商用。
 
 ## 🤝 致谢
 

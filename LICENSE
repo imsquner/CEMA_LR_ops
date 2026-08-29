@@ -1,0 +1,35 @@
+CEMA-LR — PEMFC 电压退化预测的昇腾算子化实现
+Copyright (C) 2026 ziming <ziming.auto@foxmail.com>
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published
+by the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+==============================================================================
+ License: GNU Affero General Public License v3.0 (SPDX: AGPL-3.0-only)
+
+ This LICENSE applies to the CEMA-LR method and its Ascend C operator
+ implementation (CemaFilter / LREncode / LRDecode) and associated source
+ code in this repository.
+
+ The complete, legally binding terms of the GNU AGPL v3.0 are available at:
+   https://www.gnu.org/licenses/agpl-3.0.txt
+
+ Key obligations of AGPL-3.0 (summary, not a substitute for the license):
+   - Any modified work must be licensed under AGPL-3.0 and its source
+     code made available to recipients.
+   - If you run a modified version on a network server (or provide a
+     service over a network using a modified work), you MUST offer the
+     complete corresponding source code to the users of that service.
+   - Copyright and license notices must be preserved.
+   - Contributors grant an express, worldwide, royalty-free patent license.
+==============================================================================
