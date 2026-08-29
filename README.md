@@ -62,7 +62,43 @@ flowchart LR
 
 ---
 
-## 📊 对照实验（F3 正式闭环：`LR` vs `Direct`）
+## � 流程图：PyTorch 原版 vs NPU 算子版
+
+### PyTorch / CPU 原版流程（未算子化，数据管线全在 CPU）
+
+```mermaid
+flowchart LR
+    A["原始 CSV"] --> B["pandas 1h 重采样"]
+    B --> C["pandas ewm 滤波 (EMA9/DEMA5)"]
+    C --> D["numpy 差分 + 标准化"]
+    D --> E["torch 滑窗特征 + 模型推理 (CPU)"]
+    E --> F["numpy 反标准化 + 回加"]
+    F --> G["预测曲线"]
+```
+
+### NPU 算子版流程（当前：CEMA/LR 下沉为 Ascend C 算子）
+
+```mermaid
+flowchart LR
+    A["原始 CSV"] --> B["hourly 缓存 (CPU)"]
+    B --> C["[NPU] CemaFilter<br/>EMA9 + DEMA5"]
+    C --> D["特征 z-score / 滑窗 (CPU)"]
+    D --> E["[torch_npu] 模型推理 (NPU)"]
+    E --> F["[NPU] LRDecode<br/>反标准化 + 回加"]
+    F --> G["电压预测"]
+```
+
+### 调度与耗时对比（`profile_flow` + `msprof` 实测）
+
+![调度的性能对比](images/fig_perf_compare.png)
+
+> **关键变化**：原版数据加载（CSV+1h 重采样）占 **93.7%（392ms）**；算子版将滤波/解码下沉 NPU
+> 并缓存数据管线，端到端从 **418ms → 28.8ms（~14.5x）**。此时瓶颈移至模型推理（85.2%），
+> 三个算子合计仅 ~6.3%。
+
+---
+
+## �📊 对照实验（F3 正式闭环：`LR` vs `Direct`）
 
 > 口径（2026-08-29 核对代码/数据）：本目录正式闭环 = FC1/FC2 × 5 骨干 × 5 种子（200 checkpoint），
 > 统一滤波方案 **F3**（`input=dema5, target=ema9, anchor=ema9`）。`LR` 与 `Direct` 严格配对
