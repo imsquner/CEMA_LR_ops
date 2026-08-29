@@ -1,13 +1,46 @@
-.vscode
+# ===== IDE / 编辑器 =====
+.vscode/
+.idea/
+*.swp
 .arts
-.claude/
 .opencode/
+.claude/
 
-# 构建产物
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ipynb_checkpoints/
+.venv/
+venv/
+
+# ===== 构建产物（Ascend C / CMake）=====
 build/
 *.o
 *.a
 *.so
+*.sym
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+autogen/
+*.tmp
 
-# 交接文档不入库（保持纯代码仓库）
+# ===== 运行时数据 / profiling / 调试产物 =====
+prof_data/
+results_repro/
+*.log
+fusion_result.json
+ge_check_op.json
+
+# ===== 实验数据与结果（本地资产，不入库；代码保留在 CEMA-LR_F3/code/）=====
+CEMA-LR_F3/results/
+CEMA-LR_F3/data/
+CEMA-LR_F3/code/outputs/
+CEMA-LR_F3/loop_definition.json
+
+# ===== 交接文档不入库（保持纯代码仓库）=====
 CEMA-LR_昇腾算子_交接文档.md
+

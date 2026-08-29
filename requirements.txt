@@ -1,0 +1,19 @@
+# CEMA-LR 昇腾 NPU 算子复现 — Python 依赖清单
+# 基于当前环境（Python 3.11 / Linux aarch64）实际检查到的版本生成（2026-08-29）
+# 说明：
+#   - 现有环境为 torch==2.8.0+cpu（+cpu 为 wheel 构建标记，pip 安装按标准 2.8.0 解析）
+#   - 行尾标注 [缺失] 的包当前环境未安装，需补装
+
+# ========== NPU 算子链路（torch.library + Ascend C 直调）==========
+torch==2.8.0
+torch_npu==2.8.0.post4
+torchvision==0.23.0
+torchaudio==2.8.0
+torchair                    # [缺失] torch_npu 配套图编译框架；run.py 依赖 import torchair
+
+# ========== CPU 参考实现 / 数据读取 / 对拍绘图 ==========
+numpy                       # [缺失] torch 运行依赖 + CPU 参考实现必需
+pandas                      # [缺失] FC1-FC4 电压退化数据 CSV 读取
+matplotlib                  # [缺失] 预测曲线/指标图复现（Pred_*.png、Table_*.png）
+scipy==1.15.3
+einops==0.8.2

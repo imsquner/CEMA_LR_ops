@@ -1,0 +1,16 @@
+{
+  "FC1": {
+    "gru": {"config": {"candidate_id": "GRU-C02", "hidden_size": 64, "num_layers": 2, "head_dropout": 0.0, "learning_rate": 0.001, "weight_decay": 0.0, "batch_size": 32}, "direct_epochs": 116, "lr_epochs": 10},
+    "tcn": {"config": {"candidate_id": "TCN-C04", "residual_blocks": 3, "kernel_size": 2, "channels": 64, "dropout": 0.2, "learning_rate": 0.001, "weight_decay": 0.00001, "batch_size": 64}, "direct_epochs": 108, "lr_epochs": 4},
+    "lstm": {"config": {"candidate_id": "LSTM-C03", "hidden_size": 64, "num_layers": 2, "head_dropout": 0.2, "learning_rate": 0.001, "weight_decay": 0.00001, "batch_size": 32}, "direct_epochs": 118, "lr_epochs": 6},
+    "bigru": {"config": {"candidate_id": "BIGRU-C03", "total_hidden": 96, "num_layers": 1, "head_dropout": 0.1, "learning_rate": 0.002, "weight_decay": 0.00001, "batch_size": 64}, "direct_epochs": 74, "lr_epochs": 12},
+    "transformer": {"config": {"candidate_id": "TRANSFORMER-C01", "d_model": 96, "nhead": 4, "num_layers": 2, "dim_feedforward": 128, "dropout": 0.2, "learning_rate": 0.001, "weight_decay": 0.00001, "batch_size": 32}, "direct_epochs": 112, "lr_epochs": 2}
+  },
+  "FC2": {
+    "gru": {"config": {"candidate_id": "GRU-C03", "hidden_size": 64, "num_layers": 2, "head_dropout": 0.2, "learning_rate": 0.001, "weight_decay": 0.00001, "batch_size": 32}, "direct_epochs": 84, "lr_epochs": 2},
+    "tcn": {"config": {"candidate_id": "TCN-C04", "residual_blocks": 3, "kernel_size": 2, "channels": 64, "dropout": 0.2, "learning_rate": 0.001, "weight_decay": 0.00001, "batch_size": 64}, "direct_epochs": 78, "lr_epochs": 2},
+    "lstm": {"config": {"candidate_id": "LSTM-C03", "hidden_size": 64, "num_layers": 2, "head_dropout": 0.2, "learning_rate": 0.001, "weight_decay": 0.00001, "batch_size": 32}, "direct_epochs": 100, "lr_epochs": 6},
+    "bigru": {"config": {"candidate_id": "BIGRU-C05", "total_hidden": 64, "num_layers": 2, "head_dropout": 0.1, "learning_rate": 0.001, "weight_decay": 0.0, "batch_size": 32}, "direct_epochs": 100, "lr_epochs": 4},
+    "transformer": {"config": {"candidate_id": "TRANSFORMER-C04", "d_model": 96, "nhead": 4, "num_layers": 1, "dim_feedforward": 128, "dropout": 0.2, "learning_rate": 0.0005, "weight_decay": 0.00001, "batch_size": 64}, "direct_epochs": 66, "lr_epochs": 2}
+  }
+}

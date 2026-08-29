@@ -1,123 +1,190 @@
-# cema_lr_ops注册自定义算子直调样例
-## 概述
-本样例展示了如何使用PyTorch的torch.library机制注册自定义算子，并通过<<<>>>内核调用符调用核函数，以简单的Add算子为例，实现两个向量的逐元素相加。
+# CEMA-LR：PEMFC 电压退化预测的昇腾算子化实现
 
-## 支持的产品
-- Atlas A3 训练系列产品/Atlas A3 推理系列产品
-- Atlas A2 训练系列产品/Atlas A2 推理系列产品
-- Atlas A5 训练系列产品（Ascend 950）
+> **CEMA-LR**（**C**ausal **E**xponential **M**oving **A**verage + **L**evel-**R**esidual）
+> 把"先差分、再建模"的思想融入神经网络，在 PEMFC（质子交换膜燃料电池）电压退化预测任务中
+> 显著降低 RMSE。本仓库将创新点 **CEMA** 与 **LR** 以 **Ascend C 算子**形式在昇腾 NPU 上落地，
+> 并打通"原始数据 → 算子/模型 → 电压预测曲线"的端到端链路。
 
-## A4 vs A5（910B-class vs Ascend 950 / Atlas A5）
+简体中文
 
-从 **Huawei OP DevTools** 侧边栏编译/运行时，扩展会在子进程中自动注入 `SOC_VERSION`、`NPU_ARCH` 等芯片环境变量（`CMakeLists.txt` 通过 `$ENV{NPU_ARCH}` 读取）。
+---
 
-| 环境 | spawn 注入（扩展） | 手动终端 `bash build.sh` |
-|------|-------------------|-------------------------|
-| A4 / 910B-class | `SOC_VERSION=ascend910b`，`NPU_ARCH=dav-2201` | 须 `export` 上述变量 |
-| A5 / 950 | `SOC_VERSION=ascend950`，`NPU_ARCH=dav-3510`；仿真器可用 `Ascend950PR_9589` | 须 `export` 上述变量 |
+## ✨ 效果摘要
 
-工作区设置 **`op-devtools.environment.socVersion`** 为 `ascend950` 时扩展会解析 A5 默认值。详见 [`docs/ascend-env-spec.md`](../../../../../docs/ascend-env-spec.md)。
+| 维度 | 结果 |
+|---|---|
+| **精度** | 算子 fp32 逐点误差 **< 1e-5**；端到端预测曲线与 F3 记录 **max err ~1e-6**（相对差 < 1%） |
+| **算子性能** | `lr_decode_fast` 长序列 **~154x** 加速（n=100000：2.61ms → 0.017ms）；三算子 NPU 耗时占比仅 **~6.3%** |
+| **端到端** | 原始 CSV → NPU 算子 + 模型推理 → 预测曲线 **~28.8ms**（含数据缓存） |
+| **可复现** | 服务器复现 F3 单任务 **RMSE 相对差 0.001%**（FC1×BiGRU×LR×seed42） |
 
-## 基于一站式算子开发平台进行算子开发
-基于一站式算子开发平台快速完成算子创建、开发、异常检测、性能调优 \
-指导文档：**[https://gitcode.com/opdevtools/plugin_release](https://gitcode.com/opdevtools/plugin_release)**
+---
 
-## 编译运行
+## 💡 想法：为什么是 CEMA + LR
 
-如何快速编译算子
-| 模式 | 命令 | 用途 |
-|------|------|------|
-| 普通编译 | `bash build.sh` | 日常开发验证 |
-| 异常检测 | `bash build.sh --mssanitizer` | 问题检测 |
-| 上板调优 | `bash build.sh --onboard` | 真实环境性能分析 |
-| 仿真调优 | `bash build.sh --simulator <SOC版本>`，或先 `export SOC_VERSION=<SOC版本>` 再 `bash build.sh --simulator`（与工具链/IDE 解析的 SOC 一致） | 指令级详细分析 |
+传统统计模型 ARIMA 的核心思想是**先差分、再对差分序列建模**。我们由此提出假设：把"差分 + 重构"
+融合进神经网络，可能比直接回归原始电压更利于捕捉退化趋势。
 
-## 目录结构介绍
+- **CEMA（因果指数移动平均滤波）**：用因果 EMA 对原始电压"去噪成趋势"，作为退化趋势锚点；
+  只依赖过去数据（因果性），绝不引入未来信息。
+- **LR（Level-Residual）**：神经网络学习的不是原始电压，而是**趋势锚点到下一时刻真实 EMA 之间的
+  残差（差分）**。$d_t = E_t - E_{t-1}$，再做标准化 $r_t = (d_t - \mu)/\sigma$ 放大特征；
+  推理时反标准化并**回加锚点**还原电压。
+
+```mermaid
+flowchart LR
+    A[原始电压 V_t] --> B[CemaFilter 因果 EMA]
+    B --> C[趋势锚点 E_t]
+    C --> D[LR 差分标准化 r_t]
+    D --> E[神经骨干<br/>预测 r̂_{t+1}]
+    E --> F[LR 反标准化+回加]
+    C --> F --> G[电压预测 V̂]
 ```
-├── cema_lr_ops
-│   ├── CMakeLists.txt          // 编译工程文件
-│   ├── add_custom_test.py      // PyTorch调用自定义算子的测试脚本
-│   └── add_custom.asc          // Ascend C算子实现 & 自定义算子注册
+
+---
+
+## 📊 对照实验（F3 正式闭环：`LR` vs `Direct`）
+
+> 口径（2026-08-29 核对代码/数据）：本目录正式闭环 = FC1/FC2 × 5 骨干 × 5 种子（200 checkpoint），
+> 统一滤波方案 **F3**（`input=dema5, target=ema9, anchor=ema9`）。`LR` 与 `Direct` 严格配对
+> （同一骨干/数据集/超参/初始化权重/种子）。
+
+**5 骨干 RMSE 均值（V），`F3` 滤波**：
+
+| 骨干 | FC1 `LR` | FC1 `Direct` | FC2 `LR` | FC2 `Direct` | 改善率（FC1 / FC2） |
+|---|---|---|---|---|---|
+| GRU | 0.002187 | 0.004055 | 0.001601 | 0.005944 | 46% / 73% |
+| TCN | **0.001011** | 0.002227 | 0.001352 | 0.001876 | 55% / 28% |
+| LSTM | 0.002641 | 0.005800 | 0.001571 | 0.008045 | 54% / 80% |
+| BiGRU | 0.001210 | 0.005020 | 0.001424 | 0.006499 | 76% / 78% |
+| Transformer | 0.001133 | 0.007280 | 0.001284 | 0.009363 | 84% / 86% |
+
+> 数值来源：`CEMA-LR_F3/results/formal_metrics_seedwise.csv`（逐 seed 明细）。`LR` 分支在全部
+> 5 骨干 × 2 数据集上均优于 `Direct`，验证了 CEMA-LR 方法的普适性。
+> （备注：文档 §4.2 提及的 TCN-Attention-BiGRU / PatchTST 为早期实验，本目录无权重，详见交接文档。）
+
+---
+
+## ⚙️ 算子规格（3 个业务算子）
+
+| 算子 | 创新点 | 功能 | 说明 |
+|---|---|---|---|
+| `cema_filter` | **CEMA** | 原始电压 → **EMA9**（目标/锚点）+ **DEMA5**（输入特征） | 因果 EMA 递归；推理前端必做 |
+| `lr_encode` | **LR** | EMA 序列 → 差分 + 标准化 → LR 标签 | 训练标签/数据管线（可选算子） |
+| `lr_decode_fast` | **LR** | 预测 LR → 反标准化 + 回加锚点 → 电压 | 推理末端必做（多核向量化实现） |
+
+- 神经网络骨干（BiGRU/TCN/LSTM/GRU/Transformer）**用 `torch` 实现**，通过 `torch_npu` 在 NPU 上推理，
+  **不算子化**——算子化范围只覆盖创新点（CEMA + LR 的数据变换），算子与模型**可分离、可组合**（见交接文档 §7.1）。
+- 三个算子均为 **fp32** 计算（精度最优），在 `cema_lr_ops.asc` 中通过 `torch.ops.ascendc_ops.*` 直调。
+
+---
+
+## 🧩 工程结构
+
+```text
+cema_lr_ops/
+├── CMakeLists.txt            # 编译配置
+├── build.sh                  # 构建脚本（--debug/--simulator/--onboard）
+├── cema_lr_ops.asc           # 3 个 Ascend C 算子 kernel + torch 注册
+├── run.py                    # NPU 烟雾测试（3 算子）
+├── reproduce_cema_lr.py      # 服务器复现单任务（RMSE 对拍）
+├── requirements.txt          # 依赖
+├── README.md                 # 本文件
+├── CEMA-LR_F3/               # 实验数据/代码/结果（数据管线、200 checkpoint、预测曲线）
+└── tests/
+    ├── test_reference.py     # CPU 参考实现（golden）
+    ├── test_ops.py           # 3 算子 NPU 随机 + 真实数据对拍
+    ├── test_e2e.py           # 端到端（checkpoint 模型 + NPU 算子；--from-csv 完整算子链路）
+    ├── run_all_e2e.py        # 批量（FC1/FC2 × 5 骨干 × LR × seed42）
+    └── profile_flow.py       # 端到端时序分解（性能分析）
 ```
 
-## 算子描述
-- 算子功能：  
-  Add算子实现了两个数据相加，返回相加结果的功能。对应的数学表达式为：
-  ```
-  z = x + y
-  ```
+---
 
-- 算子规格：
-  <table>
-  <tr><td rowspan="1" align="center">算子类型(OpType)</td><td colspan="4" align="center">Add</td></tr>
-  </tr>
-  <tr><td rowspan="3" align="center">算子输入</td><td align="center">name</td><td align="center">shape</td><td align="center">data type</td><td align="center">format</td></tr>
-  <tr><td align="center">x</td><td align="center">8 * 2048</td><td align="center">float</td><td align="center">ND</td></tr>
-  <tr><td align="center">y</td><td align="center">8 * 2048</td><td align="center">float</td><td align="center">ND</td></tr>
-  </tr>
-  </tr>
-  <tr><td rowspan="1" align="center">算子输出</td><td align="center">z</td><td align="center">8 * 2048</td><td align="center">float</td><td align="center">ND</td></tr>
-  </tr>
-  <tr><td rowspan="1" align="center">核函数名</td><td colspan="4" align="center">add_custom</td></tr>
-  </table>
+## 🚀 快速开始
 
-- 算子实现：
+### 环境（实测：CANN 9.0.0 / dav-2201 / 2×Ascend910）
 
-  计算逻辑是：Ascend C提供的矢量计算接口的操作元素都为LocalTensor，输入数据需要先搬运进片上存储，然后使用计算接口完成两个输入参数相加，得到最终结果，再搬出到外部存储上。
+```bash
+source /home/developer/Ascend/ascend-toolkit/set_env.sh
+export NPU_ARCH=dav-2201
+cd /mnt/workspace/gitCode/cann/cann-learning-hub/cema-lr/cema_lr_ops
+```
 
-  Add算子的实现流程分为3个基本任务：CopyIn，Compute，CopyOut。CopyIn任务负责将Global Memory上的输入Tensor xGm和yGm搬运到Local Memory，分别存储在xLocal、yLocal，Compute任务负责对xLocal、yLocal执行加法操作，计算结果存储在zLocal中，CopyOut任务负责将输出数据从zLocal搬运至Global Memory上的输出Tensor zGm中。
+### 编译
 
-- 自定义算子注册：
+```bash
+bash build.sh            # 产物：build/libcustom_ops.so
+```
 
-  本样例在add_custom.asc中定义了一个名为ascendc_ops的命名空间，并在其中注册了ascendc_add函数。
+### 运行与测试
 
-  PyTorch提供`CEMA_LR_OPS`宏作为自定义算子注册的核心接口，用于创建并初始化自定义算子库，注册后在Python侧可以通过`torch.ops.namespace.op_name`方式进行调用，例如：
-  ```c++
-  CEMA_LR_OPS(ascendc_ops, m) {
-      m.def(ascendc_add"(Tensor x, Tensor y) -> Tensor");
-  }
-  ```
+```bash
+python3 run.py                                    # 3 算子 NPU 烟雾测试
+python3 tests/test_ops.py                         # 算子随机 + 真实数据对拍
+python3 tests/test_e2e.py --dataset FC1 --backbone bigru --target lr --seed 42 --device npu:0 --dtype fp16 --from-csv
+python3 tests/run_all_e2e.py --device npu:0       # 批量 10 组合
+python3 tests/profile_flow.py --dataset FC1 --backbone bigru --dtype fp16   # 时序分解
+python3 reproduce_cema_lr.py                     # 复现 FC1×BiGRU×LR×seed42
+```
 
-  `CEMA_LR_OPS_IMPL`用于将算子逻辑绑定到特定的DispatchKey（PyTorch设备调度标识）。针对NPU设备，需要将算子实现注册到PrivateUse1这一专属的DispatchKey上，例如：
-  ```c++
-  CEMA_LR_OPS_IMPL(ascendc_ops, PrivateUse1, m)
-  {
-      m.impl("ascendc_add", TORCH_FN(ascendc_ops::ascendc_add));
-  }
-  ```
-  在ascendc_add函数中通过`c10_npu::getCurrentNPUStream()`函数获取当前NPU上的流，并通过内核调用符<<<>>>调用自定义的Kernel函数add_custom，在NPU上执行算子。
+---
 
-- Python测试脚本
+## 📈 性能与调优过程
 
-  在add_custom_test.py中，首先通过`torch.ops.load_library`加载生成的自定义算子库，调用注册的ascendc_add函数，并通过对比NPU输出与CPU标准加法结果来验证自定义算子的数值正确性。
+### 算子级：`LRDecode`（从标量到多核向量化）
 
-## 编译运行
-在本样例根目录下执行如下步骤，编译并执行算子。
-- 请参考与您当前使用的版本配套的[《Ascend Extension for PyTorch
-软件安装指南》](https://www.hiascend.com/document/detail/zh/Pytorch/720/configandinstg/instg/insg_0001.html)，获取PyTorch和torch_npu详细的安装步骤。  
+| 阶段 | 实现 | n=1156 | n=100000 | 说明 |
+|---|---|---|---|---|
+| 初版 | GM 标量全量 | 0.035ms | 2.61ms | 正确但线性慢 |
+| **优化版** `lr_decode_fast` | 多核 + Level 2 向量化 | **0.018ms** | **0.017ms** | **~154x** |
 
-- 配置环境变量  
-  请根据当前环境上CANN开发套件包的[安装方式](../../../../docs/quick_start.md#prepare&install)，选择对应配置环境变量的命令。
-  - 默认路径，root用户安装CANN软件包
-    ```bash
-    source /usr/local/Ascend/ascend-toolkit/set_env.sh
-    ```
-  - 默认路径，非root用户安装CANN软件包
-    ```bash
-    source $HOME/Ascend/ascend-toolkit/set_env.sh
-    ```
-  - 指定路径install_path，安装CANN软件包
-    ```bash
-    source ${install_path}/ascend-toolkit/set_env.sh
-    ```
-- 样例执行
-  ```bash
-  mkdir -p build && cd build;     # 创建并进入build目录
-  cmake ..;make -j;               # 编译工程
-  python3 ../add_custom_test.py   # 执行测试脚本
-  ```
-  执行结果如下，说明精度对比成功。
-  ```bash
-  Ran 1 test in **s.
-  OK
-  ```
+- **关键设计**：只对 **8 的倍数部分**用 Level 2 向量化，**尾部分给独立标量 kernel**——
+  规避 dav-2201 上 `ShiftRight` 不可用、且 Level 2 count 接口对非 8 倍数尾部 mask 不可靠的坑。
+  结果逐点 `err = 0`。（故删除初版标量实现，只保留最优版。）
+
+### 流程级：端到端时序分解（`msprof` + `profile_flow.py`）
+
+| 环节 | 优化前 | 优化后 |
+|---|---|---|
+| 数据加载（CSV+1h 重采样） | 392ms (93.7%) | **2.6ms**（hourly 缓存） |
+| 模型推理（BiGRU, fp16） | 24.6ms | 24.6ms |
+| 三算子（`cema_filter`/`lr_decode`） | 1.7ms | 1.7ms |
+| **合计** | **418ms** | **~28.8ms（~14.5x）** |
+
+`msprof` 算子级占比（端到端全 NPU，FC1×BiGRU×LR×seed42）：
+
+| 算子/操作 | 总耗时 | 占比 |
+|---|---|---|
+| `DynamicGRUV2`（GRU 模型） | 395us | 41.7% |
+| TransData / Transpose / Cast / ReverseV2（模型格式转换） | ~390us | ~40% |
+| **`cema_filter`（我们）** | 55.6us | **5.9%** |
+| **`lr_decode_vec`（我们）** | 3.7us | **0.4%** |
+
+> **结论**：我们的三算子 NPU 占比仅 ~6.3%，瓶颈在模型推理及其数据格式转换（框架/模型侧），
+> 而非算子。若要进一步压缩，可换更轻骨干或模型转 `.om` 用 ACL 推理。
+
+---
+
+## 🎯 精度与量化说明
+
+- 三个算子统一 **fp32**，逐点误差 **< 1e-5**，已与 `data_cache` golden 对拍一致。
+- **fp16 量化实测不达标**（电压量级 3.2V 下 fp16 绝对精度约 2e-3V，已超 1e-3 目标；
+  EMA 递归累积 + σ 放大使 CemaFilter 达 1.4e-2、LREncode 达 2.5、LRDecode 达 1.8e-3）。
+  故算子保持 fp32（与交接文档 §10.1 结论一致）。
+- 仅 **GRU/LSTM 类模型**在 NPU 推理时，因昇腾 `DynamicGRUV2` 算子仅支持 fp16，需用 fp16
+  （预测曲线仍与记录一致，~1e-6）；非 GRU 骨干（TCN/Transformer）可全程 fp32。
+
+---
+
+## ⚖️ 相关说明
+
+- 完整研究方法、部署手册与验收标准见 **`CEMA-LR_昇腾算子_交接文档.md`**（v0.5）。
+- 关键实测坑（`ShiftRight` 不可用、Level 2 尾部 mask 不可靠）已在交接文档 §9.2/§11.8 记录。
+- 许可证：见仓库根 `LICENSE`（CANN Open Software License Agreement v2.0）。
+
+## 🤝 致谢
+
+本工程基于此前在 2201/Ascend910B 上的 Ascend C 算子开发经验（GELU/Erf），
+并参考昇腾官方 `msopprof` 等仓库的工程组织方式。感谢昇腾社区生态。
+
