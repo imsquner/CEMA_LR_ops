@@ -1,0 +1,13 @@
+.vscode
+.arts
+.claude/
+.opencode/
+
+# 构建产物
+build/
+*.o
+*.a
+*.so
+
+# 交接文档不入库（保持纯代码仓库）
+CEMA-LR_昇腾算子_交接文档.md
