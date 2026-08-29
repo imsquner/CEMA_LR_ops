@@ -33,13 +33,32 @@
 
 ```mermaid
 flowchart LR
-    A[原始电压 V_t] --> B[CemaFilter 因果 EMA]
-    B --> C[趋势锚点 E_t]
-    C --> D[LR 差分标准化 r_t]
-    D --> E[神经骨干<br/>预测 r̂_{t+1}]
-    E --> F[LR 反标准化+回加]
-    C --> F --> G[电压预测 V̂]
+    A["原始电压 V_t"] --> B["CemaFilter 因果EMA"]
+    B --> C["趋势锚点 E_t"]
+    C --> D["LR差分标准化 r_t"]
+    D --> E["神经骨干 预测 r_hat"]
+    E --> F["LR反标准化 + 回加"]
+    C --> F --> G["电压预测 V_hat"]
 ```
+
+---
+
+## 🖼️ 效果图示（PyTorch 实现与想法）
+
+以下为在 PyTorch 上实现的 CEMA-LR 方法效果图（`figures/` 实验产物，已存档到 `images/`）。
+
+**CEMA 滤波：F0（单层 EMA9）vs F3（DEMA5）输入特征对比**
+
+![CEMA 滤波 F0 vs F3](images/fig_cema_filters.png)
+
+**LR 残差：BiGRU `LR` 分支的差分序列**
+
+![LR 差分序列](images/fig_delta_lr.png)
+
+**测试段预测对比（BiGRU）：`LR`（左） vs `Direct`（右）——LR 更贴合退化趋势**
+
+![BiGRU LR 预测](images/fig_pred_bigru_lr.png)
+![BiGRU Direct 预测](images/fig_pred_bigru_direct.png)
 
 ---
 
@@ -179,10 +198,9 @@ python3 reproduce_cema_lr.py                     # 复现 FC1×BiGRU×LR×seed42
 
 ## ⚖️ 相关说明
 
-- 完整研究方法、部署手册与验收标准见 **`CEMA-LR_昇腾算子_交接文档.md`**（v0.5）。
-- 关键实测坑（`ShiftRight` 不可用、Level 2 尾部 mask 不可靠）已在交接文档 §9.2/§11.8 记录。
-- **许可证：GNU AGPL v3.0（`LICENSE`）**。本仓库为**自创算法**，采用最严格的 copyleft 许可
-  （AGPL-3.0-only）：任何修改/网络部署（含云服务）须开源完整源码，保护算法不被闭源商用。
+- 本仓库为**自创算法**，采用 **GNU AGPL v3.0**（`LICENSE`，AGPL-3.0-only）——最严格的 copyleft 许可：
+  任何修改/网络部署（含云服务）须开源完整源码，保护算法不被闭源商用。
+- 关键实测坑（`ShiftRight` 在 dav-2201 不可用、Level 2 尾部 mask 不可靠）已在本仓库算子实现中规避。
 
 ## 🤝 致谢
 
